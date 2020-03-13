@@ -232,7 +232,7 @@ int main()
 
 	AVPacket packet;
 
-	//for first 10 frames only:
+	//for first 100 frames (actually packets) only (some of which are sound packets):
 	int packet_number = 0;
 	while ( av_read_frame( format, & packet ) >= 0 && packet_number < 100 ) {
 		//video:
