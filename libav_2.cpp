@@ -9,6 +9,7 @@ extern "C"{
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
+#include <libswresample/swresample.h>
 #include <libavfilter/avfiltergraph.h>
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
@@ -87,6 +88,23 @@ void WriteImage(const char *fileName, byte *pixels, int32 width, int32 height,in
 
 const char * VIDEO_FILE = "video.mkv";
 
+const auto sample_format_name( const auto fmt ) {
+	switch ( fmt ) {
+		case AV_SAMPLE_FMT_NONE: return "AV_SAMPLE_FMT_NONE";
+		case AV_SAMPLE_FMT_U8:   return "AV_SAMPLE_FMT_U8";
+		case AV_SAMPLE_FMT_S16:  return "AV_SAMPLE_FMT_S16";
+		case AV_SAMPLE_FMT_S32:  return "AV_SAMPLE_FMT_S32";
+		case AV_SAMPLE_FMT_FLT:  return "AV_SAMPLE_FMT_FLT";
+		case AV_SAMPLE_FMT_DBL:  return "AV_SAMPLE_FMT_DBL";
+		case AV_SAMPLE_FMT_U8P:  return "AV_SAMPLE_FMT_U8P";
+		case AV_SAMPLE_FMT_S16P: return "AV_SAMPLE_FMT_S16P";
+		case AV_SAMPLE_FMT_S32P: return "AV_SAMPLE_FMT_S32P";
+		case AV_SAMPLE_FMT_FLTP: return "AV_SAMPLE_FMT_FLTP";
+		case AV_SAMPLE_FMT_DBLP: return "AV_SAMPLE_FMT_DBLP";
+	}
+	return "UNDEFINED_FORMAT";
+}
+
 using namespace std;
 
 int main()
@@ -123,6 +141,7 @@ int main()
 	}
 
 	AVCodecParameters * videoParams = format->streams[ video_stream_index ]->codecpar;
+	AVCodecParameters * audioParams = format->streams[ audio_stream_index ]->codecpar;
 
 	const auto W = videoParams->width;
 	const auto H = videoParams->height;
@@ -185,6 +204,28 @@ int main()
 		cerr << "Could NOT initialize the conversion context!" << endl;
 		return -1;
 	}
+	
+	cout << "Having sound: " << audio_ctx->sample_fmt << " | " << audioParams->sample_rate << " | " << audioParams->channels << endl;
+	const auto OUT_SOUND_FORMAT = AV_SAMPLE_FMT_S32P;
+	struct SwrContext* swr = swr_alloc();
+	av_opt_set_int(swr, "in_channel_count",  audioParams->channels, 0);
+	av_opt_set_int(swr, "out_channel_count", 1, 0);
+	av_opt_set_int(swr, "in_channel_layout",  audioParams->channel_layout, 0);
+	av_opt_set_int(swr, "out_channel_layout", AV_CH_LAYOUT_MONO, 0);
+	av_opt_set_int(swr, "in_sample_rate", audioParams->sample_rate, 0);
+	av_opt_set_int(swr, "out_sample_rate", 48000, 0);
+	av_opt_set_sample_fmt(swr, "in_sample_fmt",  audio_ctx->sample_fmt, 0);
+	av_opt_set_sample_fmt(swr, "out_sample_fmt", OUT_SOUND_FORMAT,  0);
+	swr_init(swr);
+	if (!swr_is_initialized(swr)) {
+		cerr << "Resampler has not been properly initialized" << endl;
+		return -1;
+	}
+	AVFrame * audio_frame = av_frame_alloc();
+	if ( ! audio_frame ) {
+		cerr << "Failed to allocate audio frame" << endl;
+		return -1;
+	}
 
 	AVPacket packet;
 	av_init_packet( & packet );
@@ -192,10 +233,11 @@ int main()
 	//for first 10 frames only:
 	int packet_number = 0;
 	while ( av_read_frame( format, & packet ) >= 0 && packet_number < 10 ) {
+		//video:
 		if ( packet.stream_index == video_stream_index ) {
 			cout << "Video packet" << endl;
 			if ( avcodec_send_packet( video_ctx, & packet ) < 0 ) {
-				cerr << "Error sending a packet for decoding" << endl;
+				cerr << "Error sending a video packet for decoding" << endl;
 				return -1;
 			}
 			auto ret = 0;
@@ -203,7 +245,7 @@ int main()
 				ret = avcodec_receive_frame( video_ctx, pic_src );
 				if ( ret == AVERROR(EAGAIN) || ret == AVERROR_EOF ) break;
 				else if ( ret < 0 ) {
-					cerr << "Error during decoding" << endl;
+					cerr << "Error during video decoding" << endl;
 					return -1;
 				}
 				cout << "Frame successfully received: " << pic_src->width << " | " << pic_src->height << endl;
@@ -230,8 +272,45 @@ int main()
 			
 			++ packet_number;
 		}
+		//sound:
 		else if ( packet.stream_index == audio_stream_index ) {
 			cout << "Sound packet" << endl;
+			if ( avcodec_send_packet( audio_ctx, & packet ) < 0 ) {
+				cerr << "Error sending an audio packet for decoding" << endl;
+				return -1;
+			}
+			auto ret = 0;
+			while ( ret >= 0 ) {
+				ret = avcodec_receive_frame( audio_ctx, audio_frame );
+				if ( ret == AVERROR(EAGAIN) || ret == AVERROR_EOF ) break;
+				else if ( ret < 0 ) {
+					cerr << "Error during audio decoding" << endl;
+					return -1;
+				}
+				const auto data_size = av_get_bytes_per_sample( audio_ctx->sample_fmt );
+				if ( data_size < 1 ) {
+					/* This should not occur, checking just for paranoia */
+					cerr << "Failed to calculate audio sample data size" << endl;
+					return -1;
+				}
+				//resampling whatever to what we want:
+				void* buffer;
+				av_samples_alloc( (uint8_t**)&buffer, NULL, 1, audio_frame->nb_samples, OUT_SOUND_FORMAT, 0 );
+				const auto frame_count = swr_convert(
+					swr,
+					(uint8_t**)&buffer,
+					audio_frame->nb_samples,
+					(const uint8_t**)audio_frame->data,
+					audio_frame->nb_samples
+				);
+				if ( frame_count < 0 || frame_count != audio_frame->nb_samples ) {
+					cerr << "Sound samples conversion failed." << endl;
+					return -1;
+				}
+				cout << to_string(frame_count) << " sound frames successfully converted from " << sample_format_name( audio_ctx->sample_fmt ) << " to " << sample_format_name( OUT_SOUND_FORMAT ) << " of size " << data_size << " per sample" << endl;
+				//TODO: write to WAV file ...
+				free( buffer );
+			}
 		}
 		av_free_packet( & packet );
 		av_init_packet( & packet );
