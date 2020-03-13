@@ -86,7 +86,7 @@ void WriteImage(const char *fileName, byte *pixels, int32 width, int32 height,in
 
 
 const char * VIDEO_FILE = "video.mkv";
-const auto METHOD = 3;
+const auto METHOD = 2;
 
 using namespace std;
 
@@ -176,7 +176,19 @@ int main()
         uint8_t* src_buffer = (uint8_t*)av_malloc( av_image_get_buffer_size( SRC_FORMAT, W, H, ALIGN ) );
         uint8_t* out_buffer = (uint8_t*)av_malloc( av_image_get_buffer_size( OUT_FORMAT, W, H, ALIGN ) );
         av_image_fill_arrays( pic_src->data, pic_src->linesize, NULL, SRC_FORMAT, W, H, ALIGN );
+		pic_out->data[0] = NULL;
         av_image_fill_arrays( pic_out->data, pic_out->linesize, NULL, OUT_FORMAT, W, H, ALIGN );
+        pic_out->width  = W;
+        pic_out->height = H;
+        pic_out->format = OUT_FORMAT;
+		
+		cout << "pic_out after av_image_fill_arrays(): ";
+		const AVPixFmtDescriptor * desc = av_pix_fmt_desc_get( OUT_FORMAT );
+		for ( int i = 0; i < 4; i++) {
+			cout << (void*)pic_out->data[ desc->comp[i].plane ] << " | ";
+		}
+		
+		cout << endl;
     }
     //fails with "Failed to allocate av image" error:
     else if ( METHOD == 3 ) {
@@ -208,6 +220,9 @@ int main()
             return -1;
         }
     }
+	else if ( METHOD == 5 ) {
+		pic_out->data[0] = (uint8_t*)malloc( 3 * ( W + 4 ) * H );
+	}
     
     struct SwsContext * img_convert_ctx = sws_getContext(
         W, H, SRC_FORMAT,
@@ -226,32 +241,57 @@ int main()
     //for first 10 frames only:
     int cnt = 0;
     while ( av_read_frame( format, & packet ) >= 0 && cnt < 10 ) {
+		
         if ( packet.stream_index == video_stream_index ) {
-            int check;
-            const auto result = avcodec_decode_video2( video_ctx, pic_src, & check, & packet );
-            cout << "Bytes decoded " << result << " check " << check << endl;
-            
-			const auto ret = sws_scale(
-                img_convert_ctx,
-                pic_src->data,
-                pic_src->linesize,
-                0, 
-				H,
-                pic_out->data,
-                pic_out->linesize
-            );
-            
-            std::string name = "./";
-            name += std::to_string( cnt ) + ".bmp";
-            cout << "Writing frame " << name << " with linesize " << pic_out->linesize[0] << " ..." << endl;
-            WriteImage( name.c_str(), (uint8_t*) pic_out->data, W, H, 3 );
-            
-            if ( ret != H ) {
-                cerr << "sws_scale() worked out unexpectedly." << endl;
-                return -1;
-            }
-            
-            av_frame_unref( pic_src );
+			cout << "Video packet" << endl;
+			if ( avcodec_send_packet( video_ctx, & packet ) < 0 ) {
+				cerr << "Error sending a packet for decoding" << endl;
+				return -1;
+			}
+			auto ret = 0;
+			while ( ret >= 0 ) {
+				ret = avcodec_receive_frame( video_ctx, pic_src );
+				if ( ret == AVERROR(EAGAIN) || ret == AVERROR_EOF ) break;
+				else if ( ret < 0 ) {
+					cerr << "Error during decoding" << endl;
+					return -1;
+				}
+				cout << "Frame successfully recieved: " << pic_src->width << " | " << pic_src->height << endl;
+				
+				const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get( OUT_FORMAT );
+				if ( ! desc ) {
+					cerr << "No AVPixFmtDescriptor" << endl;
+					return -1;
+				}
+				
+			    for ( int i = 0; i < 4; i++) {
+			        int plane = desc->comp[i].plane;
+			        if (! pic_out->data[plane] || ! pic_out->linesize[plane] ) {
+						cerr << "!data || !linesize: " << (uint64_t)pic_out->data[plane] << " || " << (uint64_t)pic_out->linesize[plane] << " at plane " << plane << endl;
+						return -1;
+					}
+			    }
+	            
+				const auto ssr = sws_scale(
+	                img_convert_ctx,
+	                pic_src->data,
+	                pic_src->linesize,
+	                0, 
+					H,
+	                pic_out->data,
+	                pic_out->linesize
+	            );
+				
+				cout << "Frame successfully decoded. Writing it as BMP ..." << endl;
+				std::string name = "./";
+	            name += std::to_string( cnt ) + ".bmp";
+	            WriteImage( name.c_str(), (uint8_t*) pic_out->data, W, H, 3 );
+	            
+	            if ( ssr != H ) {
+	                cerr << "sws_scale() worked out unexpectedly." << endl;
+	                return -1;
+	            }
+			}
             
             ++ cnt;
         }
