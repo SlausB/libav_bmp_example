@@ -86,7 +86,7 @@ void WriteImage(const char *fileName, byte *pixels, int32 width, int32 height,in
 
 
 const char * VIDEO_FILE = "video.mkv";
-const auto METHOD = 2;
+const auto METHOD = 6;
 
 using namespace std;
 
@@ -188,7 +188,6 @@ int main()
 		for ( int i = 0; i < 4; i++) {
 			cout << (void*)pic_out->data[ desc->comp[i].plane ] << " | ";
 		}
-		
 		cout << endl;
     }
     //fails with "Failed to allocate av image" error:
@@ -224,6 +223,28 @@ int main()
 	else if ( METHOD == 5 ) {
 		pic_out->data[0] = (uint8_t*)malloc( 3 * ( W + 4 ) * H );
 	}
+	else if ( METHOD == 6 ) {
+		pic_out->format = OUT_FORMAT;
+		pic_out->width = W;
+		pic_out->height = H;
+		const auto afgbe = av_frame_get_buffer( pic_out, ALIGN );
+		if ( afgbe != 0 ) {
+			const auto BUFFER_SIZE = 10000;
+			auto errbuf = malloc( BUFFER_SIZE );
+			av_strerror( afgbe, (char*)errbuf, BUFFER_SIZE );
+			cerr << "av_frame_get_buffer() failed with error: " << (const char*)errbuf << endl;
+			free( errbuf );
+			return -1;
+		}
+		
+		cout << "pic_out after av_frame_get_buffer(): ";
+		const AVPixFmtDescriptor * desc = av_pix_fmt_desc_get( OUT_FORMAT );
+		for ( int i = 0; i < 4; i++) {
+			const auto p = desc->comp[i].plane;
+			cout << (void*)pic_out->data[ p ] << ", " << pic_out->linesize[ p ] << " | ";
+		}
+		cout << endl;
+	}
     
     struct SwsContext * img_convert_ctx = sws_getContext(
         W, H, SRC_FORMAT,
@@ -240,8 +261,8 @@ int main()
     av_init_packet( & packet );
     
     //for first 10 frames only:
-    int cnt = 0;
-    while ( av_read_frame( format, & packet ) >= 0 && cnt < 10 ) {
+    int packet_number = 0;
+    while ( av_read_frame( format, & packet ) >= 0 && packet_number < 10 ) {
 		
         if ( packet.stream_index == video_stream_index ) {
 			cout << "Video packet" << endl;
@@ -258,43 +279,28 @@ int main()
 					return -1;
 				}
 				cout << "Frame successfully recieved: " << pic_src->width << " | " << pic_src->height << endl;
-				
-				const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get( OUT_FORMAT );
-				if ( ! desc ) {
-					cerr << "No AVPixFmtDescriptor" << endl;
-					return -1;
-				}
-				
-			    for ( int i = 0; i < 4; i++) {
-			        int plane = desc->comp[i].plane;
-			        if (! pic_out->data[plane] || ! pic_out->linesize[plane] ) {
-						cerr << "!data || !linesize: " << (uint64_t)pic_out->data[plane] << " || " << (uint64_t)pic_out->linesize[plane] << " at plane " << plane << endl;
-						return -1;
-					}
-			    }
 	            
 				const auto ssr = sws_scale(
 	                img_convert_ctx,
 	                pic_src->data,
 	                pic_src->linesize,
-	                0, 
+	                0,
 					H,
 	                pic_out->data,
 	                pic_out->linesize
 	            );
-				
-				cout << "Frame successfully decoded. Writing it as BMP ..." << endl;
-				std::string name = "./";
-	            name += std::to_string( cnt ) + ".bmp";
-	            WriteImage( name.c_str(), (uint8_t*) pic_out->data, W, H, 3 );
-	            
 	            if ( ssr != H ) {
 	                cerr << "sws_scale() worked out unexpectedly." << endl;
 	                return -1;
 	            }
+				
+				cout << "Frame successfully decoded. Writing it as BMP ..." << endl;
+				std::string name = "./";
+	            name += std::to_string( packet_number ) + ".bmp";
+	            WriteImage( name.c_str(), (uint8_t*) pic_out->data, W, H, 3 );
 			}
             
-            ++ cnt;
+            ++ packet_number;
         }
         else if ( packet.stream_index == audio_stream_index ) {
             cout << "Sound packet" << endl;
