@@ -180,7 +180,7 @@ int main()
 
 	AVFrame* pic_src = av_frame_alloc();
 	AVFrame* pic_out = av_frame_alloc();
-
+	
 	const auto OUT_FORMAT = AV_PIX_FMT_RGB24;
 	const auto ALIGN = 32;
 	
@@ -269,7 +269,7 @@ int main()
 				cout << "Frame successfully decoded. Writing it as BMP ..." << endl;
 				std::string name = "./";
 				name += std::to_string( packet_number ) + ".bmp";
-				WriteImage( name.c_str(), (uint8_t*) pic_out->data, W, H, 3 );
+				WriteImage( name.c_str(), (uint8_t*) pic_out->data[0], W, H, 3 );
 			}
 			
 			++ packet_number;
