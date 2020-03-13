@@ -86,7 +86,6 @@ void WriteImage(const char *fileName, byte *pixels, int32 width, int32 height,in
 
 
 const char * VIDEO_FILE = "video.mkv";
-const auto METHOD = 6;
 
 using namespace std;
 
@@ -124,7 +123,12 @@ int main()
 	}
 
 	AVCodecParameters * videoParams = format->streams[ video_stream_index ]->codecpar;
-	cout << "Having " << videoParams->width << " | " << videoParams->height << " video." << endl;
+
+	const auto W = videoParams->width;
+	const auto H = videoParams->height;
+	const auto SRC_FORMAT = (AVPixelFormat)videoParams->format;
+	//const auto SRC_FORMAT = AV_PIX_FMT_YUV420P;
+	cout << "Having " << W << " | " << H << " | " << SRC_FORMAT << " video." << endl;
 
 	av_read_play( format );
 
@@ -155,95 +159,20 @@ int main()
 	AVFrame* pic_src = av_frame_alloc();
 	AVFrame* pic_out = av_frame_alloc();
 
-	const auto W = videoParams->width;
-	const auto H = videoParams->height;
-	//const auto SRC_FORMAT = video_ctx->pix_fmt;
-	const auto SRC_FORMAT = (AVPixelFormat)videoParams->format;
-	//const auto SRC_FORMAT = AV_PIX_FMT_YUV420P;
-	cout << W << " | " << H << " | " << SRC_FORMAT << endl;
-
 	const auto OUT_FORMAT = AV_PIX_FMT_RGB24;
 	const auto ALIGN = 32;
-
-	//succeeds but sws_scale() complains about "[swscaler @ 0x55a97f5615c0] bad src image pointers" and just copies pic_src to pic_out unchanged:
-	if      ( METHOD == 1 ) {
-		uint8_t* src_buffer = (uint8_t*)av_malloc( avpicture_get_size( SRC_FORMAT, W, H ) );
-		uint8_t* out_buffer = (uint8_t*)av_malloc( avpicture_get_size( OUT_FORMAT, W, H ) );
-		avpicture_fill( (AVPicture *) pic_src, src_buffer, SRC_FORMAT, W, H );
-		avpicture_fill( (AVPicture *) pic_out, out_buffer, OUT_FORMAT, W, H );
-	}
-	else if ( METHOD == 2 ) {
-		uint8_t* src_buffer = (uint8_t*)av_malloc( av_image_get_buffer_size( SRC_FORMAT, W, H, ALIGN ) );
-		uint8_t* out_buffer = (uint8_t*)av_malloc( av_image_get_buffer_size( OUT_FORMAT, W, H, ALIGN ) );
-		av_image_fill_arrays( pic_src->data, pic_src->linesize, NULL, SRC_FORMAT, W, H, ALIGN );
-		pic_out->data[0] = NULL;
-		av_image_fill_arrays( pic_out->data, pic_out->linesize, NULL, OUT_FORMAT, W, H, ALIGN );
-		pic_out->width  = W;
-		pic_out->height = H;
-		pic_out->format = OUT_FORMAT;
-
-		//why the hell pic_out->data remains NULL after av_image_fill_arrays()?
-		cout << "pic_out after av_image_fill_arrays(): ";
-		const AVPixFmtDescriptor * desc = av_pix_fmt_desc_get( OUT_FORMAT );
-		for ( int i = 0; i < 4; i++) {
-			cout << (void*)pic_out->data[ desc->comp[i].plane ] << " | ";
-		}
-		cout << endl;
-	}
-	//fails with "Failed to allocate av image" error:
-	else if ( METHOD == 3 ) {
-		pic_src->data[0] = NULL;
-		pic_out->data[0] = NULL;
-		pic_src->width  = W;
-		pic_src->height = H;
-		pic_out->width  = W;
-		pic_out->height = H;
-		pic_src->format = SRC_FORMAT;
-		pic_out->format = OUT_FORMAT;
-		if (
-			av_image_alloc( pic_src->data, pic_src->linesize, W, H, SRC_FORMAT, ALIGN ) != 0
-			||
-			av_image_alloc( pic_out->data, pic_out->linesize, W, H, OUT_FORMAT, ALIGN ) != 0
-		) {
-			cerr << "Failed to allocate av image." << endl;
-			return -1;
-		}
-	}
-	//fails with "Failed to allocate av frame." error:
-	else if ( METHOD == 4 ) {
-		if (
-		av_frame_get_buffer( pic_src, ALIGN ) != 0
-		||
-		av_frame_get_buffer( pic_out, ALIGN ) != 0
-		) {
-			cerr << "Failed to allocate av frame." << endl;
-			return -1;
-		}
-	}
-	else if ( METHOD == 5 ) {
-		pic_out->data[0] = (uint8_t*)malloc( 3 * ( W + 4 ) * H );
-	}
-	else if ( METHOD == 6 ) {
-		pic_out->format = OUT_FORMAT;
-		pic_out->width = W;
-		pic_out->height = H;
-		const auto afgbe = av_frame_get_buffer( pic_out, ALIGN );
-		if ( afgbe != 0 ) {
-			const auto BUFFER_SIZE = 10000;
-			auto errbuf = malloc( BUFFER_SIZE );
-			av_strerror( afgbe, (char*)errbuf, BUFFER_SIZE );
-			cerr << "av_frame_get_buffer() failed with error: " << (const char*)errbuf << endl;
-			free( errbuf );
-			return -1;
-		}
-
-		cout << "pic_out after av_frame_get_buffer(): ";
-		const AVPixFmtDescriptor * desc = av_pix_fmt_desc_get( OUT_FORMAT );
-		for ( int i = 0; i < 4; i++) {
-			const auto p = desc->comp[i].plane;
-			cout << (void*)pic_out->data[ p ] << ", " << pic_out->linesize[ p ] << " | ";
-		}
-		cout << endl;
+	
+	pic_out->format = OUT_FORMAT;
+	pic_out->width  = W;
+	pic_out->height = H;
+	const auto afgbe = av_frame_get_buffer( pic_out, ALIGN );
+	if ( afgbe != 0 ) {
+		const auto BUFFER_SIZE = 10000;
+		auto errbuf = malloc( BUFFER_SIZE );
+		av_strerror( afgbe, (char*)errbuf, BUFFER_SIZE );
+		cerr << "av_frame_get_buffer() failed with error: " << (const char*)errbuf << endl;
+		free( errbuf );
+		return -1;
 	}
 
 	struct SwsContext * img_convert_ctx = sws_getContext(
@@ -277,7 +206,7 @@ int main()
 					cerr << "Error during decoding" << endl;
 					return -1;
 				}
-				cout << "Frame successfully recieved: " << pic_src->width << " | " << pic_src->height << endl;
+				cout << "Frame successfully received: " << pic_src->width << " | " << pic_src->height << endl;
 				
 				const auto ssr = sws_scale(
 					img_convert_ctx,
