@@ -77,8 +77,8 @@ void WriteImage(const char *fileName, byte *pixels, int32 width, int32 height,in
 	int unpaddedRowSize = width*bytesPerPixel;
 	for ( decltype(height) i = 0; i < height; i++ )
 	{
-	        int pixelOffset = ((height - i) - 1)*unpaddedRowSize;
-	        fwrite(&pixels[pixelOffset], 1, paddedRowSize, outputFile); 
+		int pixelOffset = ((height - i) - 1)*unpaddedRowSize;
+		fwrite(&pixels[pixelOffset], 1, paddedRowSize, outputFile); 
 	}
 	fclose(outputFile);
 }
@@ -92,96 +92,96 @@ using namespace std;
 
 int main()
 {
-    av_register_all();
-    avformat_network_init();
-    avfilter_register_all();
+	av_register_all();
+	avformat_network_init();
+	avfilter_register_all();
 
-    //crashes on -Ofast without =NULL initialization:
-    AVFormatContext * format = NULL;
-    if ( avformat_open_input( & format, VIDEO_FILE, NULL, NULL ) != 0 ) {
-        cerr << "Could not open file " << VIDEO_FILE << endl;
-        return -1;
-    }
+	//crashes on -Ofast without =NULL initialization:
+	AVFormatContext * format = NULL;
+	if ( avformat_open_input( & format, VIDEO_FILE, NULL, NULL ) != 0 ) {
+		cerr << "Could not open file " << VIDEO_FILE << endl;
+		return -1;
+	}
 
-    // Retrieve stream information
-    if ( avformat_find_stream_info( format, NULL ) < 0) {
-        cerr << "avformat_find_stream_info() failed." << endl;
-        return -1;
-    }
-    av_dump_format( format, 0, VIDEO_FILE, false );
-    
-    AVCodec * video_dec = (AVCodec*)1;
-    AVCodec * audio_dec = (AVCodec*)1;
-    const auto video_stream_index = av_find_best_stream( format, AVMEDIA_TYPE_VIDEO, -1, -1, & video_dec, 0 );
-    const auto audio_stream_index = av_find_best_stream( format, AVMEDIA_TYPE_AUDIO, -1, -1, & audio_dec, 0 );
-    if ( video_stream_index < 0 ) {
-        cerr << "Failed to find video stream." << endl;
-        return -1;
-    }
-    if ( audio_stream_index < 0 ) {
-        cerr << "Failed to find audio stream." << endl;
-        return -1;
-    }
+	// Retrieve stream information
+	if ( avformat_find_stream_info( format, NULL ) < 0) {
+		cerr << "avformat_find_stream_info() failed." << endl;
+		return -1;
+	}
+	av_dump_format( format, 0, VIDEO_FILE, false );
 
-    AVCodecParameters * videoParams = format->streams[ video_stream_index ]->codecpar;
-    cout << "Having " << videoParams->width << " | " << videoParams->height << " video." << endl;
-    
-    av_read_play( format );
+	AVCodec * video_dec = (AVCodec*)1;
+	AVCodec * audio_dec = (AVCodec*)1;
+	const auto video_stream_index = av_find_best_stream( format, AVMEDIA_TYPE_VIDEO, -1, -1, & video_dec, 0 );
+	const auto audio_stream_index = av_find_best_stream( format, AVMEDIA_TYPE_AUDIO, -1, -1, & audio_dec, 0 );
+	if ( video_stream_index < 0 ) {
+		cerr << "Failed to find video stream." << endl;
+		return -1;
+	}
+	if ( audio_stream_index < 0 ) {
+		cerr << "Failed to find audio stream." << endl;
+		return -1;
+	}
 
-    // create decoding context
-    AVCodecContext * video_ctx = avcodec_alloc_context3( video_dec );
-    AVCodecContext * audio_ctx = avcodec_alloc_context3( audio_dec );
-    if ( ! video_ctx || ! audio_ctx ) {
-        cerr << "Failed to avcodec_alloc_context3()" << endl;
-        return -1;
-    }
-    if ( video_dec->capabilities & AV_CODEC_CAP_TRUNCATED ) video_ctx->flags |= AV_CODEC_FLAG_TRUNCATED; // we do not send complete frames
-    
-    /* For some codecs, such as msmpeg4 and mpeg4, width and height
-       MUST be initialized there because this information is not
-       available in the bitstream. */
-  
-    avcodec_parameters_to_context( video_ctx, format->streams[ video_stream_index ]->codecpar );
-    avcodec_parameters_to_context( audio_ctx, format->streams[ audio_stream_index ]->codecpar );
-    if ( avcodec_open2( video_ctx, video_dec, NULL ) < 0 ) {
-        cout << "Failed to open video decoder." << endl;
-        return -1;
-    }
-    if ( avcodec_open2( audio_ctx, audio_dec, NULL ) < 0 ) {
-        cout << "Failed to open audio decoder." << endl;
-        return -1;
-    }
-    
-    AVFrame* pic_src = av_frame_alloc();
-    AVFrame* pic_out = av_frame_alloc();
-    
-    const auto W = videoParams->width;
-    const auto H = videoParams->height;
-    //const auto SRC_FORMAT = video_ctx->pix_fmt;
-    const auto SRC_FORMAT = (AVPixelFormat)videoParams->format;
-    //const auto SRC_FORMAT = AV_PIX_FMT_YUV420P;
-    cout << W << " | " << H << " | " << SRC_FORMAT << endl;
-    
-    const auto OUT_FORMAT = AV_PIX_FMT_RGB24;
-    const auto ALIGN = 32;
-    
-    //succeeds but sws_scale() complains about "[swscaler @ 0x55a97f5615c0] bad src image pointers" and just copies pic_src to pic_out unchanged:
-    if      ( METHOD == 1 ) {
-        uint8_t* src_buffer = (uint8_t*)av_malloc( avpicture_get_size( SRC_FORMAT, W, H ) );
-        uint8_t* out_buffer = (uint8_t*)av_malloc( avpicture_get_size( OUT_FORMAT, W, H ) );
-        avpicture_fill( (AVPicture *) pic_src, src_buffer, SRC_FORMAT, W, H );
-        avpicture_fill( (AVPicture *) pic_out, out_buffer, OUT_FORMAT, W, H );
-    }
-    else if ( METHOD == 2 ) {
-        uint8_t* src_buffer = (uint8_t*)av_malloc( av_image_get_buffer_size( SRC_FORMAT, W, H, ALIGN ) );
-        uint8_t* out_buffer = (uint8_t*)av_malloc( av_image_get_buffer_size( OUT_FORMAT, W, H, ALIGN ) );
-        av_image_fill_arrays( pic_src->data, pic_src->linesize, NULL, SRC_FORMAT, W, H, ALIGN );
+	AVCodecParameters * videoParams = format->streams[ video_stream_index ]->codecpar;
+	cout << "Having " << videoParams->width << " | " << videoParams->height << " video." << endl;
+
+	av_read_play( format );
+
+	// create decoding context
+	AVCodecContext * video_ctx = avcodec_alloc_context3( video_dec );
+	AVCodecContext * audio_ctx = avcodec_alloc_context3( audio_dec );
+	if ( ! video_ctx || ! audio_ctx ) {
+		cerr << "Failed to avcodec_alloc_context3()" << endl;
+		return -1;
+	}
+	if ( video_dec->capabilities & AV_CODEC_CAP_TRUNCATED ) video_ctx->flags |= AV_CODEC_FLAG_TRUNCATED; // we do not send complete frames
+
+	/* For some codecs, such as msmpeg4 and mpeg4, width and height
+	MUST be initialized there because this information is not
+	available in the bitstream. */
+
+	avcodec_parameters_to_context( video_ctx, format->streams[ video_stream_index ]->codecpar );
+	avcodec_parameters_to_context( audio_ctx, format->streams[ audio_stream_index ]->codecpar );
+	if ( avcodec_open2( video_ctx, video_dec, NULL ) < 0 ) {
+		cout << "Failed to open video decoder." << endl;
+		return -1;
+	}
+	if ( avcodec_open2( audio_ctx, audio_dec, NULL ) < 0 ) {
+		cout << "Failed to open audio decoder." << endl;
+		return -1;
+	}
+
+	AVFrame* pic_src = av_frame_alloc();
+	AVFrame* pic_out = av_frame_alloc();
+
+	const auto W = videoParams->width;
+	const auto H = videoParams->height;
+	//const auto SRC_FORMAT = video_ctx->pix_fmt;
+	const auto SRC_FORMAT = (AVPixelFormat)videoParams->format;
+	//const auto SRC_FORMAT = AV_PIX_FMT_YUV420P;
+	cout << W << " | " << H << " | " << SRC_FORMAT << endl;
+
+	const auto OUT_FORMAT = AV_PIX_FMT_RGB24;
+	const auto ALIGN = 32;
+
+	//succeeds but sws_scale() complains about "[swscaler @ 0x55a97f5615c0] bad src image pointers" and just copies pic_src to pic_out unchanged:
+	if      ( METHOD == 1 ) {
+		uint8_t* src_buffer = (uint8_t*)av_malloc( avpicture_get_size( SRC_FORMAT, W, H ) );
+		uint8_t* out_buffer = (uint8_t*)av_malloc( avpicture_get_size( OUT_FORMAT, W, H ) );
+		avpicture_fill( (AVPicture *) pic_src, src_buffer, SRC_FORMAT, W, H );
+		avpicture_fill( (AVPicture *) pic_out, out_buffer, OUT_FORMAT, W, H );
+	}
+	else if ( METHOD == 2 ) {
+		uint8_t* src_buffer = (uint8_t*)av_malloc( av_image_get_buffer_size( SRC_FORMAT, W, H, ALIGN ) );
+		uint8_t* out_buffer = (uint8_t*)av_malloc( av_image_get_buffer_size( OUT_FORMAT, W, H, ALIGN ) );
+		av_image_fill_arrays( pic_src->data, pic_src->linesize, NULL, SRC_FORMAT, W, H, ALIGN );
 		pic_out->data[0] = NULL;
-        av_image_fill_arrays( pic_out->data, pic_out->linesize, NULL, OUT_FORMAT, W, H, ALIGN );
-        pic_out->width  = W;
-        pic_out->height = H;
-        pic_out->format = OUT_FORMAT;
-		
+		av_image_fill_arrays( pic_out->data, pic_out->linesize, NULL, OUT_FORMAT, W, H, ALIGN );
+		pic_out->width  = W;
+		pic_out->height = H;
+		pic_out->format = OUT_FORMAT;
+
 		//why the hell pic_out->data remains NULL after av_image_fill_arrays()?
 		cout << "pic_out after av_image_fill_arrays(): ";
 		const AVPixFmtDescriptor * desc = av_pix_fmt_desc_get( OUT_FORMAT );
@@ -189,37 +189,37 @@ int main()
 			cout << (void*)pic_out->data[ desc->comp[i].plane ] << " | ";
 		}
 		cout << endl;
-    }
-    //fails with "Failed to allocate av image" error:
-    else if ( METHOD == 3 ) {
-        pic_src->data[0] = NULL;
-        pic_out->data[0] = NULL;
-        pic_src->width  = W;
-        pic_src->height = H;
-        pic_out->width  = W;
-        pic_out->height = H;
-        pic_src->format = SRC_FORMAT;
-        pic_out->format = OUT_FORMAT;
-        if (
-            av_image_alloc( pic_src->data, pic_src->linesize, W, H, SRC_FORMAT, ALIGN ) != 0
-            ||
-            av_image_alloc( pic_out->data, pic_out->linesize, W, H, OUT_FORMAT, ALIGN ) != 0
-        ) {
-            cerr << "Failed to allocate av image." << endl;
-            return -1;
-        }
-    }
-    //fails with "Failed to allocate av frame." error:
-    else if ( METHOD == 4 ) {
-        if ( 
-            av_frame_get_buffer( pic_src, ALIGN ) != 0
-            ||
-            av_frame_get_buffer( pic_out, ALIGN ) != 0
-        ) {
-            cerr << "Failed to allocate av frame." << endl;
-            return -1;
-        }
-    }
+	}
+	//fails with "Failed to allocate av image" error:
+	else if ( METHOD == 3 ) {
+		pic_src->data[0] = NULL;
+		pic_out->data[0] = NULL;
+		pic_src->width  = W;
+		pic_src->height = H;
+		pic_out->width  = W;
+		pic_out->height = H;
+		pic_src->format = SRC_FORMAT;
+		pic_out->format = OUT_FORMAT;
+		if (
+			av_image_alloc( pic_src->data, pic_src->linesize, W, H, SRC_FORMAT, ALIGN ) != 0
+			||
+			av_image_alloc( pic_out->data, pic_out->linesize, W, H, OUT_FORMAT, ALIGN ) != 0
+		) {
+			cerr << "Failed to allocate av image." << endl;
+			return -1;
+		}
+	}
+	//fails with "Failed to allocate av frame." error:
+	else if ( METHOD == 4 ) {
+		if (
+		av_frame_get_buffer( pic_src, ALIGN ) != 0
+		||
+		av_frame_get_buffer( pic_out, ALIGN ) != 0
+		) {
+			cerr << "Failed to allocate av frame." << endl;
+			return -1;
+		}
+	}
 	else if ( METHOD == 5 ) {
 		pic_out->data[0] = (uint8_t*)malloc( 3 * ( W + 4 ) * H );
 	}
@@ -236,7 +236,7 @@ int main()
 			free( errbuf );
 			return -1;
 		}
-		
+
 		cout << "pic_out after av_frame_get_buffer(): ";
 		const AVPixFmtDescriptor * desc = av_pix_fmt_desc_get( OUT_FORMAT );
 		for ( int i = 0; i < 4; i++) {
@@ -245,26 +245,25 @@ int main()
 		}
 		cout << endl;
 	}
-    
-    struct SwsContext * img_convert_ctx = sws_getContext(
-        W, H, SRC_FORMAT,
-        W, H, OUT_FORMAT,
-        SWS_BICUBIC,
-        NULL, NULL, NULL
-    );
-    if ( img_convert_ctx == NULL ) {
-        cerr << "Could NOT initialize the conversion context!" << endl;
-        return -1;
-    }
-    
-    AVPacket packet;
-    av_init_packet( & packet );
-    
-    //for first 10 frames only:
-    int packet_number = 0;
-    while ( av_read_frame( format, & packet ) >= 0 && packet_number < 10 ) {
-		
-        if ( packet.stream_index == video_stream_index ) {
+
+	struct SwsContext * img_convert_ctx = sws_getContext(
+		W, H, SRC_FORMAT,
+		W, H, OUT_FORMAT,
+		SWS_BICUBIC,
+		NULL, NULL, NULL
+	);
+	if ( img_convert_ctx == NULL ) {
+		cerr << "Could NOT initialize the conversion context!" << endl;
+		return -1;
+	}
+
+	AVPacket packet;
+	av_init_packet( & packet );
+
+	//for first 10 frames only:
+	int packet_number = 0;
+	while ( av_read_frame( format, & packet ) >= 0 && packet_number < 10 ) {
+		if ( packet.stream_index == video_stream_index ) {
 			cout << "Video packet" << endl;
 			if ( avcodec_send_packet( video_ctx, & packet ) < 0 ) {
 				cerr << "Error sending a packet for decoding" << endl;
@@ -279,35 +278,35 @@ int main()
 					return -1;
 				}
 				cout << "Frame successfully recieved: " << pic_src->width << " | " << pic_src->height << endl;
-	            
+				
 				const auto ssr = sws_scale(
-	                img_convert_ctx,
-	                pic_src->data,
-	                pic_src->linesize,
-	                0,
+					img_convert_ctx,
+					pic_src->data,
+					pic_src->linesize,
+					0,
 					H,
-	                pic_out->data,
-	                pic_out->linesize
-	            );
-	            if ( ssr != H ) {
-	                cerr << "sws_scale() worked out unexpectedly." << endl;
-	                return -1;
-	            }
+					pic_out->data,
+					pic_out->linesize
+				);
+				if ( ssr != H ) {
+					cerr << "sws_scale() worked out unexpectedly." << endl;
+					return -1;
+				}
 				
 				cout << "Frame successfully decoded. Writing it as BMP ..." << endl;
 				std::string name = "./";
-	            name += std::to_string( packet_number ) + ".bmp";
-	            WriteImage( name.c_str(), (uint8_t*) pic_out->data, W, H, 3 );
+				name += std::to_string( packet_number ) + ".bmp";
+				WriteImage( name.c_str(), (uint8_t*) pic_out->data, W, H, 3 );
 			}
-            
-            ++ packet_number;
-        }
-        else if ( packet.stream_index == audio_stream_index ) {
-            cout << "Sound packet" << endl;
-        }
-        av_free_packet( & packet );
-        av_init_packet( & packet );
-    }
+			
+			++ packet_number;
+		}
+		else if ( packet.stream_index == audio_stream_index ) {
+			cout << "Sound packet" << endl;
+		}
+		av_free_packet( & packet );
+		av_init_packet( & packet );
+	}
 
-    return 0;
+	return 0;
 }
