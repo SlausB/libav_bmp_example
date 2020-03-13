@@ -181,7 +181,7 @@ int main()
 	AVFrame* pic_src = av_frame_alloc();
 	AVFrame* pic_out = av_frame_alloc();
 	
-	const auto OUT_FORMAT = AV_PIX_FMT_RGB24;
+	const auto OUT_FORMAT = AV_PIX_FMT_BGR24;
 	const auto ALIGN = 32;
 	
 	pic_out->format = OUT_FORMAT;
@@ -234,7 +234,7 @@ int main()
 
 	//for first 10 frames only:
 	int packet_number = 0;
-	while ( av_read_frame( format, & packet ) >= 0 && packet_number < 10 ) {
+	while ( av_read_frame( format, & packet ) >= 0 && packet_number < 100 ) {
 		//video:
 		if ( packet.stream_index == video_stream_index ) {
 			cout << "Video packet" << endl;
