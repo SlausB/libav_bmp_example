@@ -182,6 +182,7 @@ int main()
         pic_out->height = H;
         pic_out->format = OUT_FORMAT;
 		
+		//why the hell pic_out->data remains NULL after av_image_fill_arrays()?
 		cout << "pic_out after av_image_fill_arrays(): ";
 		const AVPixFmtDescriptor * desc = av_pix_fmt_desc_get( OUT_FORMAT );
 		for ( int i = 0; i < 4; i++) {
